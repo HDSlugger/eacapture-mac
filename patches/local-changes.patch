@@ -1,0 +1,98 @@
+--- a/eacapture.php
++++ b/eacapture.php
+@@ -21,7 +21,7 @@
+ const APP_VERSION = '1.0.0.0';
+ const SERVER_URL = 'https://eastest.silicondust.com/api/register';
+ const CHECK_IN_INTERVAL_SECONDS = 8 * 3600;
+-const RETRY_SECONDS = 600;
++const RETRY_SECONDS = 60;
+ const PUSH_INTERVAL_SECONDS = 60;
+ const MINIMUM_FIRMWARE_VERSION = '20261107';
+ const DISCOVER_PORT = 65001;
+@@ -30,9 +30,9 @@
+ 
+ function main(): void
+ {
+-    $options = getopt('', ['data-dir:', 'help']);
++    $options = getopt('', ['data-dir:', 'preserve-dir:', 'help']);
+     if (isset($options['help'])) {
+-        echo "Usage: php eacapture.php [--data-dir=DIR]\n";
++        echo "Usage: php eacapture.php [--data-dir=DIR] [--preserve-dir=DIR]\n";
+         exit(0);
+     }
+ 
+@@ -65,7 +65,17 @@
+         exit(1);
+     }
+ 
+-    $app = new EACapture($dataDir);
++    // Local addition (not in Silicondust's original): keep a copy of each
++    // finished recording in this folder in addition to uploading it.
++    $preserveDir = isset($options['preserve-dir']) && $options['preserve-dir'] !== ''
++        ? (string)$options['preserve-dir']
++        : null;
++    if ($preserveDir !== null && !is_dir($preserveDir) && !@mkdir($preserveDir, 0777, true)) {
++        fwrite(STDERR, "Could not create preserve folder $preserveDir\n");
++        exit(1);
++    }
++
++    $app = new EACapture($dataDir, $preserveDir);
+     $app->run();
+ }
+ 
+@@ -91,8 +101,11 @@
+     private CurlMultiHandle $multi;
+     private array $transfers = [];
+ 
+-    public function __construct(string $dataDir)
++    private ?string $preserveDir;
++
++    public function __construct(string $dataDir, ?string $preserveDir = null)
+     {
++        $this->preserveDir = $preserveDir;
+         $this->stateFile = "$dataDir/checkin_state.json";
+         $this->capturesDir = "$dataDir/Captures";
+         $this->config = defaultConfig();
+@@ -156,7 +169,7 @@
+             $this->log('Check-in failed: ' . $result['error']);
+         }
+ 
+-        $this->log($this->registered ? 'Will retry check-in in 10 minutes.' : 'Will retry in 10 minutes.');
++        $this->log($this->registered ? 'Will retry check-in in 60 seconds.' : 'Will retry in 60 seconds.');
+         $this->nextCheckInAt = microtime(true) + RETRY_SECONDS;
+     }
+ 
+@@ -410,10 +423,33 @@
+             $this->log("Could not write sidecar for $path");
+             return;
+         }
++
++        $this->preserveRecording($path, $job);
+ 
+         $this->log('Upload to run at ' . formatLocalTime($sidecar['CompletedPCUtc'] + $sidecar['UploadDelay']));
+     }
+ 
++    /** Copies a finished recording into the preserve folder, if one is set. */
++    private function preserveRecording(string $path, array $job): void
++    {
++        if ($this->preserveDir === null) {
++            return;
++        }
++
++        $name = basename((string)parse_url($job['UploadPut'], PHP_URL_PATH));
++        if ($name === '' || $name === '.' || $name === '/') {
++            $name = 'capture.dbg';
++        }
++        // The timestamp keeps repeated upload names (e.g. "...-eas.dbg") from colliding.
++        $dest = $this->preserveDir . '/' . gmdate('Ymd-His', $job['CaptureTime']) . 'Z_' . $name;
++
++        if (@copy($path, $dest)) {
++            $this->log('Preserved recording as ' . basename($dest));
++        } else {
++            $this->log("Could not preserve recording to $dest");
++        }
++    }
++
+     private function isRecording(): bool
+     {
+         foreach ($this->transfers as $transfer) {

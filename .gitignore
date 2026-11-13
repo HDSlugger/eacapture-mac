@@ -1,0 +1,10 @@
+.DS_Store
+dist/
+*.app/
+*.dmg
+src/
+vendor/src/
+vendor/work/
+vendor/prefix/
+vendor/out/
+vendor/logs/
