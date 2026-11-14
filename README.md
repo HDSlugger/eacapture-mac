@@ -24,7 +24,10 @@ logic is Silicondust's, unmodified.
 
 1. `RETRY_SECONDS` 600 -> 60, and the two matching log messages.
 2. A new optional `--preserve-dir=DIR` flag that copies each finished recording into DIR
-   before upload. Nothing else is touched, including the capture logic.
+   before upload.
+3. A new optional `--device-ip=IP` flag that also sends the discovery request straight to
+   that address, for a tuner that broadcasts cannot reach (for example, on another VLAN).
+   Nothing else is touched, including the capture logic.
 
 Verify with: `diff <(curl -s https://download.silicondust.com/EACapture/eacapture.php.txt) src/eacapture.php`
 
@@ -54,6 +57,7 @@ vendor/scripts/build-php.sh arm64 && vendor/scripts/build-php.sh x86_64
 
 ## What the app does on your machine
 
-- Network: discovers tuners on your LAN (UDP 65001), talks to `eastest.silicondust.com`.
+- Network: discovers tuners on your LAN (UDP 65001), or at the IP address set in Settings,
+  and talks to `eastest.silicondust.com`.
 - Files: `~/eacapture` (state, captures, optional `Preserved/`). Recordings are deleted after upload.
 - Optional login item and sleep prevention, both user-controlled.

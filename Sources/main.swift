@@ -72,6 +72,7 @@ final class Engine: ObservableObject {
         static let autoStart = "autoStartCapturing"
         static let showMenuBar = "showMenuBar"
         static let keepAwake = "keepAwakeWhileRunning"
+        static let deviceIP = "tunerIPAddress"
     }
 
     static var defaultPreserveDir: String {
@@ -84,6 +85,18 @@ final class Engine: ObservableObject {
         guard d.bool(forKey: Key.preserve) else { return nil }
         let dir = d.string(forKey: Key.preserveDir) ?? ""
         return dir.isEmpty ? Self.defaultPreserveDir : dir
+    }
+
+    static func isValidIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { p in
+            !p.isEmpty && p.count <= 3 && p.allSatisfy { $0.isASCII && $0.isNumber } && UInt8(p) != nil
+        }
+    }
+
+    private var deviceIPArgument: String? {
+        let ip = (UserDefaults.standard.string(forKey: Key.deviceIP) ?? "").trimmingCharacters(in: .whitespaces)
+        return Self.isValidIPv4(ip) ? ip : nil
     }
 
     /// Called by the settings sheet when a start-time setting changes.
@@ -158,6 +171,7 @@ final class Engine: ObservableObject {
         let zone = TimeZone.autoupdatingCurrent.identifier
         var arguments = ["-n", "-d", "date.timezone=\(zone)", script.path, "--data-dir=\(dataDir.path)"]
         if let preserve = preserveArgument { arguments.append("--preserve-dir=\(preserve)") }
+        if let ip = deviceIPArgument { arguments.append("--device-ip=\(ip)") }
         p.arguments = arguments
 
         let out = Pipe(), err = Pipe()
@@ -311,7 +325,7 @@ final class Engine: ObservableObject {
                     || line.hasPrefix("No suitable device found")
                     || line.hasPrefix("Device discovery failed") {
             device = "None found"
-            problems = [line + " Make sure an ATSC 3.0 HDHomeRun is on this network."]
+            problems = [line + " Make sure an ATSC 3.0 HDHomeRun is on this network, or enter its IP address in Settings."]
         } else if line == "Check-in succeeded." {
             checkInOK = true
             checkIn = "Succeeded at \(Self.shortTime.string(from: Date()))"
@@ -593,6 +607,7 @@ struct SettingsView: View {
     @AppStorage(Engine.Key.autoStart) private var autoStart = true
     @AppStorage(Engine.Key.showMenuBar) private var showMenuBar = true
     @AppStorage(Engine.Key.keepAwake) private var keepAwake = true
+    @AppStorage(Engine.Key.deviceIP) private var deviceIP = ""
 
     @State private var loginOn = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -620,6 +635,27 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(!preserve)
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            GroupBox("Tuner") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("IP address")
+                        TextField("Automatic", text: $deviceIP)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 160)
+                            .onChange(of: deviceIP) { _ in engine.settingChangedNeedingRestart() }
+                        if !deviceIP.trimmingCharacters(in: .whitespaces).isEmpty
+                            && !Engine.isValidIPv4(deviceIP.trimmingCharacters(in: .whitespaces)) {
+                            Text("Not a valid IPv4 address").font(.caption).foregroundColor(.red)
+                        }
+                    }
+                    Text("Optional. EACapture finds tuners on this network by itself. If your HDHomeRun is on another subnet or VLAN, enter its address here.")
+                        .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(6)
                 .frame(maxWidth: .infinity, alignment: .leading)

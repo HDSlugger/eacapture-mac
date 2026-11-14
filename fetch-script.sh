@@ -1,6 +1,6 @@
 #!/bin/bash
 # Downloads Silicondust's official eacapture.php, verifies it, and applies the
-# local patch (60-second retry, --preserve-dir). Result: src/eacapture.php
+# local patch (60-second retry, --preserve-dir, --device-ip). Result: src/eacapture.php
 set -euo pipefail
 cd "$(dirname "$0")"
 URL="https://download.silicondust.com/EACapture/eacapture.php.txt"
