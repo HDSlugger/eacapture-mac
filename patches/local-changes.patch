@@ -14,14 +14,14 @@
  function main(): void
  {
 -    $options = getopt('', ['data-dir:', 'help']);
-+    $options = getopt('', ['data-dir:', 'preserve-dir:', 'help']);
++    $options = getopt('', ['data-dir:', 'preserve-dir:', 'device-ip:', 'help']);
      if (isset($options['help'])) {
 -        echo "Usage: php eacapture.php [--data-dir=DIR]\n";
-+        echo "Usage: php eacapture.php [--data-dir=DIR] [--preserve-dir=DIR]\n";
++        echo "Usage: php eacapture.php [--data-dir=DIR] [--preserve-dir=DIR] [--device-ip=IP]\n";
          exit(0);
      }
  
-@@ -65,7 +65,17 @@
+@@ -65,7 +65,27 @@
          exit(1);
      }
  
@@ -36,24 +36,46 @@
 +        exit(1);
 +    }
 +
-+    $app = new EACapture($dataDir, $preserveDir);
++    // Local addition: also send discovery straight to this address, for a
++    // tuner that broadcasts cannot reach (e.g. on another VLAN).
++    $deviceIp = isset($options['device-ip']) && $options['device-ip'] !== ''
++        ? (string)$options['device-ip']
++        : null;
++    if ($deviceIp !== null && ip2long($deviceIp) === false) {
++        fwrite(STDERR, "Invalid tuner IP address $deviceIp\n");
++        exit(1);
++    }
++
++    $app = new EACapture($dataDir, $preserveDir, $deviceIp);
      $app->run();
  }
  
-@@ -91,8 +101,11 @@
+@@ -91,8 +111,13 @@
      private CurlMultiHandle $multi;
      private array $transfers = [];
  
 -    public function __construct(string $dataDir)
 +    private ?string $preserveDir;
++    private ?string $deviceIp;
 +
-+    public function __construct(string $dataDir, ?string $preserveDir = null)
++    public function __construct(string $dataDir, ?string $preserveDir = null, ?string $deviceIp = null)
      {
 +        $this->preserveDir = $preserveDir;
++        $this->deviceIp = $deviceIp;
          $this->stateFile = "$dataDir/checkin_state.json";
          $this->capturesDir = "$dataDir/Captures";
          $this->config = defaultConfig();
-@@ -156,7 +169,7 @@
+@@ -102,6 +127,9 @@
+     public function run(): void
+     {
+         $this->log($this->loadState() ? 'Loaded configuration' : 'First launch');
++        if ($this->deviceIp !== null) {
++            $this->log("Discovery will also be sent directly to {$this->deviceIp}.");
++        }
+ 
+         // Nothing is recording yet, so every .tmp without a sidecar is a
+         // dead partial capture.
+@@ -156,7 +184,7 @@
              $this->log('Check-in failed: ' . $result['error']);
          }
  
@@ -62,16 +84,24 @@
          $this->nextCheckInAt = microtime(true) + RETRY_SECONDS;
      }
  
-@@ -410,10 +423,33 @@
-             $this->log("Could not write sidecar for $path");
+@@ -212,7 +240,7 @@
+     private function runDiscovery(): void
+     {
+         try {
+-            $devices = discoverDevices();
++            $devices = discoverDevices($this->deviceIp !== null ? [$this->deviceIp] : []);
+         } catch (RuntimeException $e) {
+             // Keep the previously chosen device.
+             $this->log('Device discovery failed: ' . $e->getMessage());
+@@ -411,7 +439,30 @@
              return;
          }
-+
+ 
 +        $this->preserveRecording($path, $job);
- 
++
          $this->log('Upload to run at ' . formatLocalTime($sidecar['CompletedPCUtc'] + $sidecar['UploadDelay']));
-     }
- 
++    }
++
 +    /** Copies a finished recording into the preserve folder, if one is set. */
 +    private function preserveRecording(string $path, array $job): void
 +    {
@@ -91,8 +121,24 @@
 +        } else {
 +            $this->log("Could not preserve recording to $dest");
 +        }
-+    }
-+
+     }
+ 
      private function isRecording(): bool
-     {
-         foreach ($this->transfers as $transfer) {
+@@ -730,7 +781,7 @@
+     ] + defaultConfig();
+ }
+ 
+-function discoverDevices(): array
++function discoverDevices(array $extraAddresses = []): array
+ {
+     $socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+     if ($socket === false) {
+@@ -743,7 +794,7 @@
+     }
+ 
+     $request = discoverRequestPacket();
+-    $addresses = broadcastAddresses();
++    $addresses = array_values(array_unique(array_merge(broadcastAddresses(), $extraAddresses)));
+     $devices = [];
+ 
+     for ($send = 0; $send < 2; $send++) {
