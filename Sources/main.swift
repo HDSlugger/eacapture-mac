@@ -94,9 +94,29 @@ final class Engine: ObservableObject {
         }
     }
 
-    private var deviceIPArgument: String? {
-        let ip = (UserDefaults.standard.string(forKey: Key.deviceIP) ?? "").trimmingCharacters(in: .whitespaces)
-        return Self.isValidIPv4(ip) ? ip : nil
+    enum DeviceIPSetting: Equatable {
+        case automatic, valid(String), invalid(String)
+
+        var address: String? {
+            if case .valid(let ip) = self { return ip }
+            return nil
+        }
+    }
+
+    static func deviceIPSetting(_ raw: String) -> DeviceIPSetting {
+        let ip = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ip.isEmpty { return .automatic }
+        return isValidIPv4(ip) ? .valid(ip) : .invalid(ip)
+    }
+
+    /// The tuner address the running engine was started with.
+    @Published private(set) var activeDeviceIP: String?
+
+    /// An invalid address is ignored until it is fixed, so that a restart never silently drops it.
+    func deviceIPChanged(to raw: String) {
+        let setting = Self.deviceIPSetting(raw)
+        if case .invalid = setting { return }
+        if running && setting.address != activeDeviceIP { needsRestart = true }
     }
 
     /// Called by the settings sheet when a start-time setting changes.
@@ -171,7 +191,15 @@ final class Engine: ObservableObject {
         let zone = TimeZone.autoupdatingCurrent.identifier
         var arguments = ["-n", "-d", "date.timezone=\(zone)", script.path, "--data-dir=\(dataDir.path)"]
         if let preserve = preserveArgument { arguments.append("--preserve-dir=\(preserve)") }
-        if let ip = deviceIPArgument { arguments.append("--device-ip=\(ip)") }
+        let ipSetting = Self.deviceIPSetting(UserDefaults.standard.string(forKey: Key.deviceIP) ?? "")
+        switch ipSetting {
+        case .valid(let ip):
+            arguments.append("--device-ip=\(ip)")
+        case .invalid(let raw):
+            append("The tuner IP address “\(raw)” in Settings is not a valid IPv4 address. EACapture will use automatic discovery only.", isError: true)
+        case .automatic:
+            break
+        }
         p.arguments = arguments
 
         let out = Pipe(), err = Pipe()
@@ -206,6 +234,7 @@ final class Engine: ObservableObject {
         process = p
         stopRequested = false
         needsRestart = false
+        activeDeviceIP = ipSetting.address
         running = true
         problems = []
         checkInOK = false
@@ -325,7 +354,11 @@ final class Engine: ObservableObject {
                     || line.hasPrefix("No suitable device found")
                     || line.hasPrefix("Device discovery failed") {
             device = "None found"
-            problems = [line + " Make sure an ATSC 3.0 HDHomeRun is on this network, or enter its IP address in Settings."]
+            if let ip = activeDeviceIP {
+                problems = [line + " The tuner at \(ip) did not reply. Make sure it is on and that this Mac can reach it on UDP port 65001."]
+            } else {
+                problems = [line + " Make sure an ATSC 3.0 HDHomeRun is on this network, or enter its IP address in Settings."]
+            }
         } else if line == "Check-in succeeded." {
             checkInOK = true
             checkIn = "Succeeded at \(Self.shortTime.string(from: Date()))"
@@ -647,9 +680,8 @@ struct SettingsView: View {
                         TextField("Automatic", text: $deviceIP)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 160)
-                            .onChange(of: deviceIP) { _ in engine.settingChangedNeedingRestart() }
-                        if !deviceIP.trimmingCharacters(in: .whitespaces).isEmpty
-                            && !Engine.isValidIPv4(deviceIP.trimmingCharacters(in: .whitespaces)) {
+                            .onChange(of: deviceIP) { engine.deviceIPChanged(to: $0) }
+                        if case .invalid = Engine.deviceIPSetting(deviceIP) {
                             Text("Not a valid IPv4 address").font(.caption).foregroundColor(.red)
                         }
                     }

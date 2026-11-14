@@ -65,7 +65,17 @@
          $this->stateFile = "$dataDir/checkin_state.json";
          $this->capturesDir = "$dataDir/Captures";
          $this->config = defaultConfig();
-@@ -156,7 +181,7 @@
+@@ -102,6 +127,9 @@
+     public function run(): void
+     {
+         $this->log($this->loadState() ? 'Loaded configuration' : 'First launch');
++        if ($this->deviceIp !== null) {
++            $this->log("Discovery will also be sent directly to {$this->deviceIp}.");
++        }
+ 
+         // Nothing is recording yet, so every .tmp without a sidecar is a
+         // dead partial capture.
+@@ -156,7 +184,7 @@
              $this->log('Check-in failed: ' . $result['error']);
          }
  
@@ -74,7 +84,7 @@
          $this->nextCheckInAt = microtime(true) + RETRY_SECONDS;
      }
  
-@@ -212,7 +237,7 @@
+@@ -212,7 +240,7 @@
      private function runDiscovery(): void
      {
          try {
@@ -83,16 +93,15 @@
          } catch (RuntimeException $e) {
              // Keep the previously chosen device.
              $this->log('Device discovery failed: ' . $e->getMessage());
-@@ -410,10 +435,33 @@
-             $this->log("Could not write sidecar for $path");
+@@ -411,7 +439,30 @@
              return;
          }
-+
+ 
 +        $this->preserveRecording($path, $job);
- 
++
          $this->log('Upload to run at ' . formatLocalTime($sidecar['CompletedPCUtc'] + $sidecar['UploadDelay']));
-     }
- 
++    }
++
 +    /** Copies a finished recording into the preserve folder, if one is set. */
 +    private function preserveRecording(string $path, array $job): void
 +    {
@@ -112,12 +121,10 @@
 +        } else {
 +            $this->log("Could not preserve recording to $dest");
 +        }
-+    }
-+
+     }
+ 
      private function isRecording(): bool
-     {
-         foreach ($this->transfers as $transfer) {
-@@ -730,7 +778,7 @@
+@@ -730,7 +781,7 @@
      ] + defaultConfig();
  }
  
@@ -126,7 +133,7 @@
  {
      $socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
      if ($socket === false) {
-@@ -743,7 +791,7 @@
+@@ -743,7 +794,7 @@
      }
  
      $request = discoverRequestPacket();
