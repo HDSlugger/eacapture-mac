@@ -49,7 +49,7 @@ vendor/scripts/build-php.sh arm64 && vendor/scripts/build-php.sh x86_64
 ./build.sh
 ```
 
-`package.sh` is my release script: it uses my Developer ID and notarytool profile. Change
+`package.sh` is my release script: it uses my Developer ID and profile. Change
 `IDENTITY` and `PROFILE` to use your own. It is not needed for a local build.
 
 ## What the app does on your machine
